@@ -1,0 +1,8 @@
+flask>=2.0
+scikit-learn>=1.0
+lightgbm>=3.0
+catboost>=1.0
+scipy
+joblib
+numpy
+gunicorn

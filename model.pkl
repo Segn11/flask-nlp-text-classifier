@@ -1,0 +1,156 @@
+# ===============================
+# 📦 1. Imports
+# ===============================
+import pandas as pd
+import numpy as np
+import re
+from sklearn.model_selection import StratifiedKFold
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
+from lightgbm import LGBMClassifier, early_stopping, log_evaluation
+from catboost import CatBoostClassifier, Pool
+from scipy.sparse import hstack
+
+# ===============================
+# 📁 2. Load Data
+
+df = pd.read_csv('/content/Train (5).csv')
+test = pd.read_csv('/content/Test (4).csv')
+
+# ===============================
+ y = df["target"].values  # ensure it's numpy array
+ df_id = df["ID"].copy()
+ test_id = test["ID"].copy()
+ X_df_raw = df.drop(columns=["ID", "target"]).copy()
+ X_te_raw = test.drop(columns=["ID"]).copy()
+ all_data = pd.concat([X_df_raw, X_te_raw], axis=0).reset_index(drop=True)
+
+# ===============================
+# 🧼 3. Clean Text Function
+# ===============================
+def clean_text(text):
+    text = str(text).lower()
+    text = re.sub(r"http\S+", " ", text)
+    text = re.sub(r"@\w+", " ", text)
+    text = re.sub(r"#", " ", text)
+    text = re.sub(r"[^a-z\s]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    stop_words = set([
+        "a","an","the","and","or","if","in","on","at","to","for","with",
+        "of","by","is","it","this","that","from","as","be","are","was",
+        "were","will","can","has","have","had","but","not"
+    ])
+    tokens = [word for word in text.split() if word not in stop_words]
+    return " ".join(tokens)
+
+all_data["clean_text"] = all_data["text"].apply(clean_text)
+
+# ===============================
+# 🔢 4. TF-IDF Vectorization (word + char ngrams)
+# ===============================
+tfidf_word = TfidfVectorizer(
+    max_features=15000,
+    ngram_range=(1,3),
+    sublinear_tf=True,
+    min_df=5,
+    max_df=0.9
+)
+tfidf_char = TfidfVectorizer(
+    max_features=5000,
+    analyzer='char_wb',
+    ngram_range=(3,5),
+    sublinear_tf=True
+)
+
+X_word = tfidf_word.fit_transform(all_data["clean_text"])
+X_char = tfidf_char.fit_transform(all_data["clean_text"])
+
+X_all = hstack([X_word, X_char])
+X_train = X_all[:X_df_raw.shape[0]]
+X_test = X_all[X_df_raw.shape[0]:]
+
+# ===============================
+# 🧩 5. Stratified K-Fold Training + Ensemble
+# ===============================
+NFOLDS = 5
+skf = StratifiedKFold(n_splits=NFOLDS, shuffle=True, random_state=42)
+
+oof_preds = np.zeros(X_train.shape[0])
+test_preds = np.zeros(X_test.shape[0])
+
+for fold, (tr_idx, val_idx) in enumerate(skf.split(X_train, y)):
+    print(f"Fold {fold+1}/{NFOLDS}")
+    
+    X_tr, X_val = X_train[tr_idx], X_train[val_idx]
+    y_tr, y_val = y[tr_idx], y[val_idx]
+    
+    # Logistic Regression
+    lr_model = LogisticRegression(
+        solver='liblinear',
+        C=5,
+        max_iter=1000,
+        class_weight='balanced',
+        random_state=42
+    )
+    lr_model.fit(X_tr, y_tr)
+    val_lr = lr_model.predict_proba(X_val)[:,1]
+    test_lr = lr_model.predict_proba(X_test)[:,1]
+    
+    # LightGBM
+    lgb_model = LGBMClassifier(
+        n_estimators=1000,
+        learning_rate=0.05,
+        num_leaves=31,
+        max_depth=-1,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        class_weight='balanced',
+        random_state=42
+    )
+    lgb_model.fit(
+        X_tr, y_tr,
+        eval_set=[(X_val, y_val)],
+        eval_metric='auc',
+        callbacks=[early_stopping(stopping_rounds=50), log_evaluation(0)]
+    )
+    val_lgb = lgb_model.predict_proba(X_val)[:,1]
+    test_lgb = lgb_model.predict_proba(X_test)[:,1]
+    
+    # CatBoost
+    cb_model = CatBoostClassifier(
+        iterations=1000,
+        learning_rate=0.05,
+        depth=6,
+        eval_metric='AUC',
+        random_seed=42,
+        verbose=0,
+        auto_class_weights='Balanced'
+    )
+    cb_model.fit(Pool(X_tr, y_tr), eval_set=Pool(X_val, y_val), early_stopping_rounds=50)
+    val_cb = cb_model.predict_proba(X_val)[:,1]
+    test_cb = cb_model.predict_proba(X_test)[:,1]
+    
+    # Average ensemble
+    val_fold = (val_lr + val_lgb + val_cb) / 3
+    test_fold = (test_lr + test_lgb + test_cb) / 3
+    
+    oof_preds[val_idx] = val_fold
+    test_preds += test_fold / NFOLDS
+
+# ===============================
+# 📊 6. Evaluate
+# ===============================
+auc = roc_auc_score(y, oof_preds)
+print(f"OOF Validation AUC (ensemble): {auc:.5f}")
+
+# ===============================
+# 🧾 7. Submission
+# ===============================
+submission = pd.DataFrame({
+    "ID": test_id,
+    "target": test_preds
+})
+submission.to_csv("submission.csv", index=False)
+print("✅ Submission saved!")
+#1

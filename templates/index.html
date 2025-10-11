@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Text Classifier</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <div class="card">
+      <h1>Text Classifier</h1>
+      <form method="post">
+        <textarea name="text" placeholder="Enter text here..." required>{{ text }}</textarea>
+        <button type="submit">Classify</button>
+      </form>
+
+      {% if result %}
+      <div class="result">
+        <div class="label">Result: {{ result.label }}</div>
+        <div class="prob">Probability: {{ result.probability }}</div>
+      </div>
+      {% endif %}
+      <footer class="small">Model loaded from <code>model/</code>. Ensure your models and vectorizers are saved there.</footer>
+    </div>
+  </body>
+  </html>
