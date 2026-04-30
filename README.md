@@ -26,7 +26,6 @@ How to run:
 
    python app.py
 
-4. Open http://127.0.0.1:5000 in your browser.
 
 Notes:
 - The app cleans input text, vectorizes with TF-IDF (word and char), obtains probabilities from the three models, averages them, and shows Positive (>= 0.5) or Negative (< 0.5).
