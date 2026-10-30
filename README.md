@@ -1,4 +1,4 @@
-  # Flask NLP Ensemble Classifier
+# Flask NLP Ensemble Classifier
 
 This repository contains a small Flask app that loads pre-trained models and TF-IDF vectorizers from a `model/` directory and serves a web UI for text classification.
 
